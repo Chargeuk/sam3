@@ -5,10 +5,8 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-
 from huggingface_hub import hf_hub_download
 from iopath.common.file_io import g_pathmgr
-
 from sam3.model.decoder import (
     TransformerDecoder,
     TransformerDecoderLayer,
@@ -32,9 +30,7 @@ from sam3.model.model_misc import (
 )
 from sam3.model.necks import Sam3DualViTDetNeck
 from sam3.model.position_encoding import PositionEmbeddingSine
-
 from sam3.model.sam1_task_predictor import SAM3InteractiveImagePredictor
-
 from sam3.model.sam3_image import Sam3Image, Sam3ImageOnVideoMultiGPU
 from sam3.model.sam3_tracking_predictor import Sam3TrackerPredictor
 from sam3.model.sam3_video_inference import Sam3VideoInferenceWithInstanceInteractivity
@@ -43,10 +39,6 @@ from sam3.model.text_encoder_ve import VETextEncoder
 from sam3.model.tokenizer_ve import SimpleTokenizer
 from sam3.model.vitdet import ViT
 from sam3.model.vl_combiner import SAM3VLBackbone
-from sam3.sam.transformer import RoPEAttention
-
-SAM3_MODEL_ID = "facebook/sam3"
-SAM3_CKPT_NAME = "sam3.pt"
 
 
 # Setup TensorFloat-32 for Ampere GPUs if available
@@ -372,6 +364,9 @@ def _create_tracker_maskmem_backbone():
 
 def _create_tracker_transformer():
     """Create the SAM3 Tracker transformer components."""
+    # Import RoPEAttention locally to avoid top-level import issues
+    from sam3.sam.transformer import RoPEAttention
+    
     # Self attention
     self_attention = RoPEAttention(
         embedding_dim=256,
@@ -529,6 +524,7 @@ def _create_sam3_transformer(has_presence_token: bool = True) -> TransformerWrap
 
 def _load_checkpoint(model, checkpoint_path):
     """Load model checkpoint from file."""
+    print(f"Loading SAM3 Checkpoint from: {checkpoint_path}")
     with g_pathmgr.open(checkpoint_path, "rb") as f:
         ckpt = torch.load(f, map_location="cpu", weights_only=True)
     if "model" in ckpt and isinstance(ckpt["model"], dict):
@@ -588,7 +584,7 @@ def build_sam3_image_model(
     """
     if bpe_path is None:
         bpe_path = os.path.join(
-            os.path.dirname(__file__), "..", "assets", "bpe_simple_vocab_16e6.txt.gz"
+            os.path.dirname(__file__), "assets", "bpe_simple_vocab_16e6.txt.gz"
         )
     # Create visual components
     compile_mode = "default" if compile else None
@@ -633,9 +629,7 @@ def build_sam3_image_model(
         eval_mode,
     )
     if load_from_HF and checkpoint_path is None:
-        checkpoint_path = hf_hub_download(
-            repo_id=SAM3_MODEL_ID, filename=SAM3_CKPT_NAME
-        )
+        checkpoint_path = download_ckpt_from_hf()
     # Load checkpoint if provided
     if checkpoint_path is not None:
         _load_checkpoint(model, checkpoint_path)
@@ -644,6 +638,15 @@ def build_sam3_image_model(
     model = _setup_device_and_mode(model, device, eval_mode)
 
     return model
+
+
+def download_ckpt_from_hf():
+    SAM3_MODEL_ID = "facebook/sam3"
+    SAM3_CKPT_NAME = "sam3.pt"
+    SAM3_CFG_NAME = "config.json"
+    _ = hf_hub_download(repo_id=SAM3_MODEL_ID, filename=SAM3_CFG_NAME)
+    checkpoint_path = hf_hub_download(repo_id=SAM3_MODEL_ID, filename=SAM3_CKPT_NAME)
+    return checkpoint_path
 
 
 def build_sam3_video_model(
@@ -669,7 +672,7 @@ def build_sam3_video_model(
     """
     if bpe_path is None:
         bpe_path = os.path.join(
-            os.path.dirname(__file__), "..", "assets", "bpe_simple_vocab_16e6.txt.gz"
+            os.path.dirname(__file__), "assets", "bpe_simple_vocab_16e6.txt.gz"
         )
 
     # Build Tracker module
@@ -768,9 +771,7 @@ def build_sam3_video_model(
 
     # Load checkpoint if provided
     if load_from_HF and checkpoint_path is None:
-        checkpoint_path = hf_hub_download(
-            repo_id=SAM3_MODEL_ID, filename=SAM3_CKPT_NAME
-        )
+        checkpoint_path = download_ckpt_from_hf()
     if checkpoint_path is not None:
         with g_pathmgr.open(checkpoint_path, "rb") as f:
             ckpt = torch.load(f, map_location="cpu", weights_only=True)
@@ -786,6 +787,9 @@ def build_sam3_video_model(
             print(f"Unexpected keys: {unexpected_keys}")
 
     model.to(device=device)
+
+    print(f"SAM3 Video Checkpoint loaded from: {checkpoint_path}")
+
     return model
 
 
